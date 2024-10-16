@@ -1,0 +1,113 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login --username "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t mukeshkr1234/node-api-kubernetes:${{ github.sha::8 }} .
+          docker push mukeshkr1234/node-api-kubernetes:${{ github.sha::8 }}
+
+      - name: SSH into Hostinger VPS and Deploy to Minikube
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOSTINGER_IP }} # Your Hostinger VPS IP
+          username: ${{ secrets.HOSTINGER_USER }} # Your Hostinger username
+          key: ${{ secrets.HOSTINGER_SSH_KEY }} # Your SSH private key
+          script: |
+            # Ensure kubectl is configured for Minikube
+            export KUBECONFIG=$HOME/.kube/config
+
+            # Check existing resources and delete if they exist
+            kubectl delete deployment node-app --ignore-not-found
+            kubectl delete service node-app-service --ignore-not-found
+            kubectl delete ingress node-app-ingress --ignore-not-found
+            kubectl delete secret app-secrets --ignore-not-found
+
+            # Update the deployment file with the new image tag
+            sed -i 's|image: mukeshkr1234/node-api-kubernetes:.*|image: mukeshkr1234/node-api-kubernetes:'"${GITHUB_SHA::8}"'|' k8s/deployment.yaml
+
+            # Apply Kubernetes manifests
+            kubectl apply -f k8s/deployment.yaml
+            kubectl apply -f k8s/service.yaml
+            kubectl apply -f k8s/ingress.yaml
+
+            # Create and apply Kubernetes secrets
+            cat <<EOF > k8s/app-secrets-filled.yaml
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: app-secrets
+            type: Opaque
+            data:
+              MONGODB_URI: $(echo -n "${{ secrets.MONGODB_URI }}" | base64 -w 0)
+              GOOGLE_CLIENT_ID: $(echo -n "${{ secrets.GOOGLE_CLIENT_ID }}" | base64 -w 0)
+              GOOGLE_CLIENT_SECRET: $(echo -n "${{ secrets.GOOGLE_CLIENT_SECRET }}" | base64 -w 0)
+              CLIENT_URL: $(echo -n "${{ secrets.CLIENT_URL }}" | base64 -w 0)
+              SESSION_SECRET: $(echo -n "${{ secrets.SESSION_SECRET }}" | base64 -w 0)
+              UPSTASH_REDIS_REST_URL: $(echo -n "${{ secrets.UPSTASH_REDIS_REST_URL }}" | base64 -w 0)
+              UPSTASH_REDIS_REST_TOKEN: $(echo -n "${{ secrets.UPSTASH_REDIS_REST_TOKEN }}" | base64 -w 0)
+              GEMINI_API_KEY: $(echo -n "${{ secrets.GEMINI_API_KEY }}" | base64 -w 0)
+              RESEND_API_KEY: $(echo -n "${{ secrets.RESEND_API_KEY }}" | base64 -w 0)
+              STRIPE_SECRET_KEY: $(echo -n "${{ secrets.STRIPE_SECRET_KEY }}" | base64 -w 0)
+              STRIPE_WEBHOOK_SECRET: $(echo -n "${{ secrets.STRIPE_WEBHOOK_SECRET }}" | base64 -w 0)
+            EOF
+            kubectl apply -f k8s/app-secrets-filled.yaml
+            rm k8s/app-secrets-filled.yaml  # Clean up the filled secret file
+
+            # Check deployment status
+            kubectl rollout status deployment/node-app
+            kubectl get pods
+            kubectl get services
+            kubectl get ingress
+
+            # Wait for LoadBalancer external IP if applicable
+            echo "Waiting for LoadBalancer external IP..."
+            while [ -z $(kubectl get service node-app-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}') ]; do
+              sleep 10
+            done
+            echo "External IP: $(kubectl get service node-app-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+
+            # Check ingress status
+            echo "Ingress status:"
+            kubectl describe ingress node-app-ingress
+
+            # Check pod logs
+            echo "Pod logs:"
+            kubectl logs -l app=node-app --tail=100
+
+            # Deployment summary
+            echo "Deployment Summary:"
+            echo "-------------------"
+            echo "Pods:"
+            kubectl get pods -l app=node-app
+            echo "\nServices:"
+            kubectl get services
+            echo "\nIngress:"
+            kubectl get ingress
+            echo "\nExternal IP:"
+            kubectl get service node-app-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+            # Check pod logs in case of failure
+            if [ $? -ne 0 ]; then
+              for pod in $(kubectl get pods -l app=node-app -o jsonpath='{.items[*].metadata.name}'); do
+                echo "Logs for $pod:"
+                kubectl logs $pod
+                echo "-------------------"
+              done
+            fi
+
+            # Describe deployment in case of failure
+            if [ $? -ne 0 ]; then
+              kubectl describe deployment node-app
+            fi
