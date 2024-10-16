@@ -15,8 +15,10 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          docker build -t mukeshkr1234/node-api-kubernetes:${{ github.sha::8 }} .
-          docker push mukeshkr1234/node-api-kubernetes:${{ github.sha::8 }}
+          IMAGE_TAG=${{ github.sha }}  # Full SHA
+          SHORT_SHA=${{ github.sha.substring(0, 8) }}  # Get the first 8 characters of the SHA
+          docker build -t mukeshkr1234/node-api-kubernetes:$SHORT_SHA .
+          docker push mukeshkr1234/node-api-kubernetes:$SHORT_SHA
 
       - name: SSH into Hostinger VPS and Deploy to Minikube
         uses: appleboy/ssh-action@master
@@ -35,7 +37,7 @@ jobs:
             kubectl delete secret app-secrets --ignore-not-found
 
             # Update the deployment file with the new image tag
-            sed -i 's|image: mukeshkr1234/node-api-kubernetes:.*|image: mukeshkr1234/node-api-kubernetes:'"${GITHUB_SHA::8}"'|' k8s/deployment.yaml
+            sed -i 's|image: mukeshkr1234/node-api-kubernetes:.*|image: mukeshkr1234/node-api-kubernetes:'"${{ github.sha.substring(0, 8) }}"'|' k8s/deployment.yaml
 
             # Apply Kubernetes manifests
             kubectl apply -f k8s/deployment.yaml
