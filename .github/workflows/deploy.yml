@@ -25,7 +25,7 @@ jobs:
         with:
           host: ${{ secrets.HOSTINGER_IP }} # Your Hostinger VPS IP
           username: ${{ secrets.HOSTINGER_USER }} # Your Hostinger username
-          key: ${{ secrets.HOSTINGER_SSH_KEY }} # Your SSH private key
+          key: ${{ secrets.HOSTINGER_ROOT_PASSWORD  }} # Your SSH private key
           script: |
             # Ensure kubectl is configured for Minikube
             export KUBECONFIG=$HOME/.kube/config
