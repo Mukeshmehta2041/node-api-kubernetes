@@ -20,12 +20,19 @@ jobs:
           docker build -t mukeshkr1234/node-api-kubernetes:$SHORT_SHA .
           docker push mukeshkr1234/node-api-kubernetes:$SHORT_SHA
 
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HOSTINGER_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.HOSTINGER_IP }} >> ~/.ssh/known_hosts
+
       - name: SSH into Hostinger VPS and Deploy to Minikube
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.HOSTINGER_IP }} # Your Hostinger VPS IP
           username: ${{ secrets.HOSTINGER_USER }} # Your Hostinger username
-          key: ${{ secrets.HOSTINGER_ROOT_PASSWORD  }} # Your SSH private key
+          key: ${{ secrets.HOSTINGER_SSH_KEY }} # Your SSH private key
           script: |
             # Ensure kubectl is configured for Minikube
             export KUBECONFIG=$HOME/.kube/config
