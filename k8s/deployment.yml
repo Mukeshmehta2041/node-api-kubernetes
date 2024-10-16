@@ -14,11 +14,9 @@ spec:
     spec:
       containers:
         - name: node-app
-          image: mukeshkr1234/node-api-kubernetes:latest
+          image: mukeshkr1234/node-api-kubernetes:latest # Public image
           ports:
             - containerPort: 8080
           envFrom:
             - secretRef:
                 name: app-secrets
-      imagePullSecrets:
-        - name: registry-digitaloceanregistry

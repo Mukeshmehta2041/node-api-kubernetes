@@ -1,14 +1,61 @@
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-prod
-spec:
-  acme:
-    server: https://acme-v02.api.letsencrypt.org/directory
-    email: mkmehta2041@gmail.com
-    privateKeySecretRef:
-      name: letsencrypt-prod
-    solvers:
-      - http01:
-          ingress:
-            class: nginx
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main] # Change this to your main branch if it's not 'main'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Log in to Docker Hub
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login --username "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+
+      # Build and push Docker image
+      - name: Build and push Docker image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          docker build -t mukeshkr1234/node-api-kubernetes:$SHORT_SHA .
+          docker push mukeshkr1234/node-api-kubernetes:$SHORT_SHA
+
+      # Set up SSH key for connecting to your VPS
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HOSTINGER_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.HOSTINGER_IP }} >> ~/.ssh/known_hosts
+
+      # SSH into Hostinger VPS and Deploy to Minikube
+      - name: SSH into Hostinger VPS and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOSTINGER_IP }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          script: |
+            # Ensure kubectl is configured for Minikube
+            export KUBECONFIG=$HOME/.kube/config
+
+            # Apply ClusterIssuer configuration
+            kubectl apply -f k8s/cluster-issuer.yaml
+
+            # Check existing resources and delete if they exist
+            kubectl delete deployment node-app --ignore-not-found
+            kubectl delete service node-app-service --ignore-not-found
+            kubectl delete ingress node-app-ingress --ignore-not-found
+
+            # Update deployment file with new image tag
+            sed -i 's|image: mukeshkr1234/node-api-kubernetes:.*|image: mukeshkr1234/node-api-kubernetes:'"${SHORT_SHA}"'|' k8s/deployment.yaml
+
+            # Apply Kubernetes manifests
+            kubectl apply -f k8s/deployment.yaml
+            kubectl apply -f k8s/service.yaml
+            kubectl apply -f k8s/ingress.yaml
